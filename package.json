@@ -1,0 +1,23 @@
+{
+  "name": "raw-socket-sniffer",
+  "version": "0.1.0",
+  "description": "IPv4 packet capture on Windows without a kernel driver.",
+  "main": "index.js",
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "GirkovArpa",
+  "license": "MIT",
+  "private": false,
+  "gypfile": true,
+  "dependencies": {
+    "bindings": "^1.2.1",
+    "node-addon-api": "^1.7.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nospaceships/raw-socket-sniffer"
+  }
+}

@@ -1,4 +1,2 @@
-
-/*.exe
-/src/*.obj
-/tmp/*.cap
+build
+node_modules
