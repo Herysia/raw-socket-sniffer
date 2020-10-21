@@ -9,7 +9,7 @@ simply use existing operating system functionality.
 ## Example Usage
 ```javascript
 'use strict';
-const sniff = require('./index.js');
+const sniff = require('raw-socket-sniffer');
 sniff('192.168.0.3', (packet) => console.log(packet));
 ```
 
