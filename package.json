@@ -18,6 +18,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nospaceships/raw-socket-sniffer"
+    "url": "git+https://github.com/GirkovArpa/raw-socket-sniffer"
+  },
+  "homepage": "https://github.com/GirkovArpa/raw-socket-sniffer#readme",
+  "bugs": {
+    "url": "https://github.com/GirkovArpa/raw-socket-sniffer/issues",
+    "email": "GirkovArpa@protonmail.com"
   }
 }
