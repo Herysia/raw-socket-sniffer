@@ -90,8 +90,8 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
         if (obj->port == 0 || srcport == obj->port || dstport == obj->port)
         {
 
-            // std::cout << srcport << "->" << dstport << std::endl;
-            //  Store for dispatch
+            std::cout << srcport << "->" << dstport << std::endl;
+            //   Store for dispatch
             auto packetLen = rc + BUFFER_SIZE_ETH;
             unsigned char *pktbuff = (unsigned char *)malloc(packetLen);
             memcpy(pktbuff, obj->buffer, packetLen);
