@@ -1,6 +1,8 @@
 "use strict";
 const { RawSocket } = require("./index.js");
-const rs = new RawSocket("192.168.0.51", 443);
+const ip = "192.168.0.51"; //Your local interface IP
+const port = 443; // The port you would like to try with (we use 443 as there is easily TCP traffic there)
+const rs = new RawSocket(ip, port);
 rs.on("data", (data) => {
   //We would like to have both directions here (working in Node 16), not working with electron (tested with v22 & v18)
   //Currently there is a std::cout which logs in/out ports which highlight the problem,

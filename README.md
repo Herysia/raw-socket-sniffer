@@ -1,56 +1,33 @@
-
 # raw-socket-sniffer
 
-This repository is a fork of [nospaceships/raw-socket-sniffer](https://github.com/nospaceships/raw-socket-sniffer) rewritten as an NPM package.
+This branch is used as a bug repro for Electron.
 
-The programs require no additional software, such as WinPCAP or npcap, and will
-simply use existing operating system functionality.
+# Usage:
 
-## Example Usage
-```javascript
-'use strict';
-const sniff = require('raw-socket-sniffer');
-sniff('192.168.0.3', (packet) => console.log(packet));
-```
+## Setup
 
-## Example Output
-```javascript
-{
-  ethernet_header: {
-    mac_addr_dst: '00:00:00:00:00:00', // fake, always zeros
-    mac_addr_src: '00:00:00:00:00:00', // fake, always zeros
-    eth_type: 8 // always 8
-  },
-  ipv4_header: {
-    ip_version_number: 4, // always 4
-    ihl: 5,
-    bytes_length: 20,
-    service_type: 0,
-    total_length: 22784,
-    id: 40055,
-    flags: '0000',
-    fragment_offset: 0, // incorrect due to unfixed bug in parse_ipv4.js
-    time_to_live: 255,
-    protocol: 'UDP',
-    header_checksum: 16034,
-    src_addr: 'xxx.xxx.xxx.xxx',
-    dst_addr: 'xxx.xxx.xxx.xxx'
-  },
-  packet_header: { port_src: 5353, port_dst: 5353, length: 69, checksum: 11246 }, // only UDP packets are parsed
-  payload: <Buffer 00 00 00 00 00 01 33 70 00 00 00 00 08 1f 61 69>
-}
-```
+- Change the ip to your local interface IP you want to capture
+- Change the port you want to filter (443 can easily have TCP traffic), or 0 for any (log may be flooded by UDP)
+- Need to be run as Administrator for Raw sockets
 
-## Ethernet Headers
+### For Node test
 
-The programs in this repository use raw sockets to capture IP packets.  A side
-effect of this is that no ethernet header is included in the data received.  If
-it is required to capture ethernet header data then another tool should be used.
+- Build with `npm run rebuild`
+- Run with `npm run start`
 
-Since the original program produces PCAP files, and PCAP files include fully formed
-packets, a fake ethernet header is synthesized for each packet using the all
-zeros source and destination ethernet addresses.
+### For Electron test
 
-This does not affect other protocol layers, and, for example, TCP streams
-can still be reassembled, and IP layer source and destination addresses are
-all still valid.
+- Build with `npm run rebuild:electron`
+- Run with `npm run start:electron`
+
+# Bug
+
+We expect TCP packets to be captured on both sides, as it already the case for Node,
+but when building and running with Electron, **only inbound TCP packets are captured** with `recv()`,
+while both **inbound & outbound are captured for UDP** (on both Node & Electron)
+
+See the following video of traffic captured with
+Left: Electron v22.0.0
+Right: Node v16.15.1
+
+https://dl.dropboxusercontent.com/s/2m99yopiserbpcy/Code_2023-01-05_22-05-35.mp4
