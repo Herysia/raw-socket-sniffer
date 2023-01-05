@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "install": "node-gyp rebuild",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "rebuild": "node-gyp rebuild",
+    "rebuild:electron": "node-gyp rebuild --target=22.0.0 --arch=x64 --dist-url=https://electronjs.org/headers",
+    "start:electron": "electron ./repro",
+    "start": "node ./repro"
   },
   "keywords": [
     "cap",
@@ -35,5 +38,9 @@
   "bugs": {
     "url": "https://github.com/GirkovArpa/raw-socket-sniffer/issues",
     "email": "GirkovArpa@protonmail.com"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.2.10",
+    "electron": "^22.0.0"
   }
 }
