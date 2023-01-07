@@ -73,7 +73,7 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
             errorCode = WSAGetLastError();
             if (errorCode == WSAEWOULDBLOCK)
             {
-                // std::cout << "shouldblock" << std::endl;
+                std::cout << "shouldblock" << std::endl;
                 return 0;
             }
             return errorCode;
@@ -86,6 +86,7 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
         if (rc <= BUFFER_OFFSET_IP)
         {
             // std::cout << "rc <= BUFFER_OFFSET_IP" << std::endl;
+
             return 0; // malformed data: silent (probably not IP packet)
         }
         // filter port
@@ -93,11 +94,13 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
         if (rc <= BUFFER_OFFSET_IP + ipHeaderLen + 3)
         {
             // std::cout << "rc <= BUFFER_OFFSET_IP + ipHeaderLen + 3" << std::endl;
+
             return 0; // malformed data: silent (probably not IP packet)
         }
         uint8_t protocol = buffer[BUFFER_OFFSET_IP + 9];
         if (protocol != 6) // check for tcp
         {
+
             return 0; // ignore UDP (or any other if pkt is malformed)
         }
         // filter port

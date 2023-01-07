@@ -15,14 +15,10 @@ rs.on("data", (data) => {
       rsLen += ip.info.totallen;
       rsCount++;
       const tcp = decoders.TCP(data, ip.offset);
-      if (tcp.info.srcport !== port && tcp.info.dstport !== port) console.log(data.toSring("hex"));
-      //console.log(data.toString("hex"));
-      //console.log(`Rs: ${ip.info.totallen} - ${rsLen}(${rsCount})`);
-    } else {
-      console.log(data.toSring("hex"));
+      const tcpDataLength = ip.info.totallen - ip.hdrlen - tcp.hdrlen;
+      if (tcpDataLength > 0) console.log("rs", data.subarray(tcp.offset, tcp.offset + tcpDataLength).toString("hex"));
+      if (ip.info.totallen + 14 != data.length) process.exit();
     }
-  } else {
-    console.log(data.toSring("hex"));
   }
 });
 const c = new Cap();
@@ -46,6 +42,10 @@ c.on("packet", function (nbytes, trunc) {
       if (ip.info.protocol === PROTOCOL.IP.TCP) {
         capData.len += ip.info.totallen;
         capData.count++;
+        const tcp = decoders.TCP(buffer, ip.offset);
+        const tcpDataLength = ip.info.totallen - ip.hdrlen - tcp.hdrlen;
+        if (tcpDataLength > 0)
+          console.log("cp", buffer.subarray(tcp.offset, tcp.offset + tcpDataLength).toString("hex"));
       }
       //console.log(`Cap: ${ip.info.totallen} - ${capData.len}(${capData.count})`);
     }
