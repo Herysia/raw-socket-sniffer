@@ -110,8 +110,8 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
             //  Store for dispatch
             auto packetLen = rc + BUFFER_SIZE_ETH;
             // Build fake eth header
-            memset(buffer, 0, 14);
-            buffer[12] = 0x08;
+            // memset(buffer, 0, 14);
+            // buffer[12] = 0x08;
             PacketEventData *eventData = new PacketEventData;
             // We save to a new buffer, as we will use a nonblocking emit, to keep this thread receiving packets
             unsigned char *pktbuff = (unsigned char *)malloc(packetLen);

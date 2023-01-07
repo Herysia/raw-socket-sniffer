@@ -5,7 +5,7 @@ var PROTOCOL = decoders.PROTOCOL;
 
 let rsCount = 0;
 let rsLen = 0;
-const port = 666;
+const port = 6040;
 const rs = new RawSocket("192.168.0.51", port);
 rs.on("data", (data) => {
   const eth = decoders.Ethernet(data);
@@ -16,6 +16,7 @@ rs.on("data", (data) => {
       rsCount++;
       const tcp = decoders.TCP(data, ip.offset);
       if (tcp.info.srcport !== port && tcp.info.dstport !== port) console.log(data.toSring("hex"));
+      //console.log(data.toString("hex"));
       //console.log(`Rs: ${ip.info.totallen} - ${rsLen}(${rsCount})`);
     } else {
       console.log(data.toSring("hex"));
