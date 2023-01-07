@@ -5,17 +5,23 @@ var PROTOCOL = decoders.PROTOCOL;
 
 let rsCount = 0;
 let rsLen = 0;
-const port = 443;
+const port = 666;
 const rs = new RawSocket("192.168.0.51", port);
 rs.on("data", (data) => {
   const eth = decoders.Ethernet(data);
   if (eth.info.type === PROTOCOL.ETHERNET.IPV4) {
     const ip = decoders.IPV4(data, eth.offset);
-    if (ip.info.protocol === PROTOCOL.IP.TCP || ip.info.protocol === PROTOCOL.IP.UDP) {
+    if (ip.info.protocol === PROTOCOL.IP.TCP) {
       rsLen += ip.info.totallen;
       rsCount++;
-      console.log(`Rs: ${ip.info.totallen} - ${rsLen}(${rsCount})`);
+      const tcp = decoders.TCP(data, ip.offset);
+      if (tcp.info.srcport !== port && tcp.info.dstport !== port) console.log(data.toSring("hex"));
+      //console.log(`Rs: ${ip.info.totallen} - ${rsLen}(${rsCount})`);
+    } else {
+      console.log(data.toSring("hex"));
     }
+  } else {
+    console.log(data.toSring("hex"));
   }
 });
 const c = new Cap();
@@ -36,11 +42,11 @@ c.on("packet", function (nbytes, trunc) {
 
     if (eth.info.type === PROTOCOL.ETHERNET.IPV4) {
       const ip = decoders.IPV4(buffer, eth.offset);
-      if (ip.info.protocol === PROTOCOL.IP.TCP || ip.info.protocol === PROTOCOL.IP.UDP) {
+      if (ip.info.protocol === PROTOCOL.IP.TCP) {
         capData.len += ip.info.totallen;
         capData.count++;
       }
-      console.log(`Cap: ${ip.info.totallen} - ${capData.len}(${capData.count})`);
+      //console.log(`Cap: ${ip.info.totallen} - ${capData.len}(${capData.count})`);
     }
   }
 });

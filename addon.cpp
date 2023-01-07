@@ -56,20 +56,26 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
             //  TODO: emit close/error ?
             return;
         }
+        uv_async_send(handle);
     }
     static int handle_packet(uv_async_t *handle)
     {
         int errorCode = 0;
         RawSocketCapture *obj = (RawSocketCapture *)handle->data;
-        unsigned char buffer[65536];
-        // TODO: we don't want to allocate
-        //  Read the next packet, should not block as we checked for the event earlier
+        // unsigned char buffer[65536];
+        unsigned char *buffer = obj->buffer;
+        // We should have concurent calls anymore so we're fine
+        //  TODO: we don't want to allocate
+        //   Read the next packet, should not block as we checked for the event earlier
         int rc = recv(obj->sd, (char *)(buffer + BUFFER_OFFSET_IP), BUFFER_SIZE_IP, 0);
         if (rc == SOCKET_ERROR)
         {
             errorCode = WSAGetLastError();
             if (errorCode == WSAEWOULDBLOCK)
+            {
+                // std::cout << "shouldblock" << std::endl;
                 return 0;
+            }
             return errorCode;
         }
         if (rc == 0) // End of file for some strange reason, so stop reading packets.
@@ -78,14 +84,23 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
             return errorCode;
         }
         if (rc <= BUFFER_OFFSET_IP)
+        {
+            // std::cout << "rc <= BUFFER_OFFSET_IP" << std::endl;
             return 0; // malformed data: silent (probably not IP packet)
+        }
         // filter port
         uint8_t ipHeaderLen = (buffer[BUFFER_OFFSET_IP] & 0x0f) * 4;
-        if (rc <= BUFFER_OFFSET_IP + ipHeaderLen + 3) // malformed data: silent (probably not IP or TCP packet)
-            return 0;
+        if (rc <= BUFFER_OFFSET_IP + ipHeaderLen + 3)
+        {
+            // std::cout << "rc <= BUFFER_OFFSET_IP + ipHeaderLen + 3" << std::endl;
+            return 0; // malformed data: silent (probably not IP packet)
+        }
         uint8_t protocol = buffer[BUFFER_OFFSET_IP + 9];
-        if (protocol != 6 && protocol != 17) // check for tcp or udp
-            return 0;
+        if (protocol != 6) // check for tcp
+        {
+            return 0; // ignore UDP (or any other if pkt is malformed)
+        }
+        // filter port
         uint16_t srcport = (buffer[BUFFER_OFFSET_IP + ipHeaderLen] << 8) | buffer[BUFFER_OFFSET_IP + ipHeaderLen + 1];
         uint16_t dstport = (buffer[BUFFER_OFFSET_IP + ipHeaderLen + 2] << 8) | buffer[BUFFER_OFFSET_IP + ipHeaderLen + 3];
         if (obj->port == 0 || srcport == obj->port || dstport == obj->port)
@@ -98,16 +113,15 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
             memset(buffer, 0, 14);
             buffer[12] = 0x08;
             PacketEventData *eventData = new PacketEventData;
-            /*
+            // We save to a new buffer, as we will use a nonblocking emit, to keep this thread receiving packets
             unsigned char *pktbuff = (unsigned char *)malloc(packetLen);
             memcpy(pktbuff, buffer, packetLen);
-            */
             eventData->copy_len = packetLen;
-            eventData->pkt_data = buffer;
+            eventData->pkt_data = pktbuff;
             auto cb = [](Napi::Env env, Napi::Function jsCallback, PacketEventData *data)
             {
                 jsCallback.Call({Napi::String::New(env, "data"), Napi::Buffer<unsigned char>::Copy(env, data->pkt_data, data->copy_len)});
-                // TODO: cleanup data ?
+                free(data->pkt_data);
             };
             obj->tsEmit_.BlockingCall(eventData, cb);
         }
@@ -201,30 +215,7 @@ public:
                               &this->async,
                               (uv_async_cb)RawSocketCapture::cb_packets);
         this->async.data = this;
-
-        // We use an auto reset event instead of WSACreateEvent which is manual reset
-        recvEvent = (WSAEVENT)CreateEvent(NULL, false, false, NULL);
-        WSAEventSelect(sd, recvEvent, FD_WRITE | FD_READ);
-        r = RegisterWaitForSingleObject(
-            &this->wait,
-            recvEvent,
-            RawSocketCapture::OnPacket,
-            &this->async,
-            INFINITE,
-            WT_EXECUTEINWAITTHREAD);
-        if (!r)
-        {
-            char *errmsg = nullptr;
-            FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                          nullptr,
-                          GetLastError(),
-                          MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                          (LPTSTR)&errmsg,
-                          0,
-                          nullptr);
-            Napi::TypeError::New(env, errmsg).ThrowAsJavaScriptException();
-            return;
-        }
+        uv_async_send(&this->async);
     }
     static Napi::Function Init(Napi::Env env, Napi::Object exports)
     {
