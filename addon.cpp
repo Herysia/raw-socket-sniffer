@@ -43,7 +43,6 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
     static void CALLBACK OnPacket(void *data, BOOLEAN didTimeout)
     {
         uv_async_t *async = (uv_async_t *)data;
-        WSAResetEvent(((RawSocketCapture *)async->data)->recvEvent);
         int r = uv_async_send(async);
     }
     static void cb_packets(uv_async_t *handle)
@@ -62,8 +61,10 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
     {
         int errorCode = 0;
         RawSocketCapture *obj = (RawSocketCapture *)handle->data;
-        // Read the next packet, should not block as we checked for the event earlier
-        int rc = recv(obj->sd, (char *)(obj->buffer + BUFFER_OFFSET_IP), BUFFER_SIZE_IP, 0);
+        unsigned char buffer[65536];
+        // TODO: we don't want to allocate
+        //  Read the next packet, should not block as we checked for the event earlier
+        int rc = recv(obj->sd, (char *)(buffer + BUFFER_OFFSET_IP), BUFFER_SIZE_IP, 0);
         if (rc == SOCKET_ERROR)
         {
             errorCode = WSAGetLastError();
@@ -79,32 +80,35 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
         if (rc <= BUFFER_OFFSET_IP)
             return 0; // malformed data: silent (probably not IP packet)
         // filter port
-        uint8_t ipHeaderLen = (obj->buffer[BUFFER_OFFSET_IP] & 0x0f) * 4;
+        uint8_t ipHeaderLen = (buffer[BUFFER_OFFSET_IP] & 0x0f) * 4;
         if (rc <= BUFFER_OFFSET_IP + ipHeaderLen + 3) // malformed data: silent (probably not IP or TCP packet)
             return 0;
-        uint8_t protocol = obj->buffer[BUFFER_OFFSET_IP + 9];
+        uint8_t protocol = buffer[BUFFER_OFFSET_IP + 9];
         if (protocol != 6 && protocol != 17) // check for tcp or udp
             return 0;
-        uint16_t srcport = (obj->buffer[BUFFER_OFFSET_IP + ipHeaderLen] << 8) | obj->buffer[BUFFER_OFFSET_IP + ipHeaderLen + 1];
-        uint16_t dstport = (obj->buffer[BUFFER_OFFSET_IP + ipHeaderLen + 2] << 8) | obj->buffer[BUFFER_OFFSET_IP + ipHeaderLen + 3];
+        uint16_t srcport = (buffer[BUFFER_OFFSET_IP + ipHeaderLen] << 8) | buffer[BUFFER_OFFSET_IP + ipHeaderLen + 1];
+        uint16_t dstport = (buffer[BUFFER_OFFSET_IP + ipHeaderLen + 2] << 8) | buffer[BUFFER_OFFSET_IP + ipHeaderLen + 3];
         if (obj->port == 0 || srcport == obj->port || dstport == obj->port)
         {
 
             // std::cout << srcport << "->" << dstport << std::endl;
             //  Store for dispatch
             auto packetLen = rc + BUFFER_SIZE_ETH;
-            unsigned char *pktbuff = (unsigned char *)malloc(packetLen);
-            memcpy(pktbuff, obj->buffer, packetLen);
-            // struct PacketEventData data ={pktbuff, packetLen};
+            // Build fake eth header
+            memset(buffer, 0, 14);
+            buffer[12] = 0x08;
             PacketEventData *eventData = new PacketEventData;
+            /*
+            unsigned char *pktbuff = (unsigned char *)malloc(packetLen);
+            memcpy(pktbuff, buffer, packetLen);
+            */
             eventData->copy_len = packetLen;
-            eventData->pkt_data = pktbuff;
+            eventData->pkt_data = buffer;
             auto cb = [](Napi::Env env, Napi::Function jsCallback, PacketEventData *data)
             {
                 jsCallback.Call({Napi::String::New(env, "data"), Napi::Buffer<unsigned char>::Copy(env, data->pkt_data, data->copy_len)});
-                free(data->pkt_data);
+                // TODO: cleanup data ?
             };
-
             obj->tsEmit_.BlockingCall(eventData, cb);
         }
         return 0;
@@ -152,14 +156,11 @@ public:
         Napi::Function bound = emit.Get("bind").As<Napi::Function>().Call(emit, {info.This()}).As<Napi::Function>();
         this->tsEmit_ = Napi::ThreadSafeFunction::New(
             bound.Env(),
-            bound,          // JavaScript function called asynchronously
-            "packet",       // Name
-            0,              // Unlimited queue
-            1,              // Only one thread will use this initially
-            [](Napi::Env) { // Finalizer used to clean threads up
-                // nativeThread.join();
-            });
-        ;
+            bound,    // JavaScript function called asynchronously
+            "packet", // Name
+            0,        // Unlimited queue
+            1         // Only one thread will use this initially
+        );
         // init buffer
         buffer = (unsigned char *)malloc(BUFFER_SIZE_PKT);
         memset(buffer, 0, BUFFER_SIZE_PKT);
@@ -201,8 +202,9 @@ public:
                               (uv_async_cb)RawSocketCapture::cb_packets);
         this->async.data = this;
 
-        recvEvent = WSACreateEvent();
-        WSAEventSelect(sd, recvEvent, FD_READ);
+        // We use an auto reset event instead of WSACreateEvent which is manual reset
+        recvEvent = (WSAEVENT)CreateEvent(NULL, false, false, NULL);
+        WSAEventSelect(sd, recvEvent, FD_WRITE | FD_READ);
         r = RegisterWaitForSingleObject(
             &this->wait,
             recvEvent,
