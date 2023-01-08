@@ -5,7 +5,9 @@ var PROTOCOL = decoders.PROTOCOL;
 
 let rsCount = 0;
 let rsLen = 0;
-const port = 6040;
+const port = 443;
+const rs2 = new RawSocket("192.168.206.1", port);
+rs2.listen();
 const rs = new RawSocket("192.168.0.51", port);
 rs.on("data", (data) => {
   const eth = decoders.Ethernet(data);
@@ -15,8 +17,8 @@ rs.on("data", (data) => {
       rsLen += ip.info.totallen;
       rsCount++;
       const tcp = decoders.TCP(data, ip.offset);
-      const tcpDataLength = ip.info.totallen - ip.hdrlen - tcp.hdrlen;
-      if (tcpDataLength > 0) console.log("rs", data.subarray(tcp.offset, tcp.offset + tcpDataLength).toString("hex"));
+      const dataLength = ip.info.totallen - 14;
+      if (dataLength > 0) console.log("rs", data.subarray(14, 14 + dataLength).toString("hex"));
       if (ip.info.totallen + 14 != data.length) process.exit();
     }
   }
@@ -43,9 +45,8 @@ c.on("packet", function (nbytes, trunc) {
         capData.len += ip.info.totallen;
         capData.count++;
         const tcp = decoders.TCP(buffer, ip.offset);
-        const tcpDataLength = ip.info.totallen - ip.hdrlen - tcp.hdrlen;
-        if (tcpDataLength > 0)
-          console.log("cp", buffer.subarray(tcp.offset, tcp.offset + tcpDataLength).toString("hex"));
+        const dataLength = ip.info.totallen - 14;
+        if (dataLength > 0) console.log("cp", buffer.subarray(14, 14 + dataLength).toString("hex"));
       }
       //console.log(`Cap: ${ip.info.totallen} - ${capData.len}(${capData.count})`);
     }

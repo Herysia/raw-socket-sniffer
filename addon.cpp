@@ -18,6 +18,7 @@ struct PacketEventData
 class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
 {
     SOCKET sd;
+    FD_SET readSet;
     int port;
 
     unsigned char *buffer;
@@ -31,6 +32,8 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
     uv_async_t async;
     HANDLE wait;
     HANDLE recvEvent;
+
+    WSAEVENT eventHandle;
 
     void close(const Napi::CallbackInfo &info)
     {
@@ -47,16 +50,34 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
     }
     static void cb_packets(uv_async_t *handle)
     {
-        int errorCode = handle_packet(handle);
-        if (errorCode)
+        // std::cout << "cb_packets - we got an event, consume all data" << std::endl;
+        RawSocketCapture *obj = (RawSocketCapture *)handle->data;
+        /*
+        int rc = select(0, &obj->readSet, NULL, NULL, NULL); // We get data
+
+        if (rc == SOCKET_ERROR)
         {
-            std::cout << errorCode << std::endl;
-            RawSocketCapture *obj = (RawSocketCapture *)handle->data;
+            std::cout << WSAGetLastError() << std::endl;
             obj->tsEmit_.Release();
             //  TODO: emit close/error ?
             return;
         }
-        uv_async_send(handle);
+        */
+        while (true)
+        {
+            int errorCode = handle_packet(handle); // consume all data
+            if (errorCode == WSAEWOULDBLOCK)
+            {
+                break;
+            }
+            if (errorCode)
+            {
+                obj->tsEmit_.Release();
+                //  TODO: emit close/error ?
+                return;
+            }
+        }
+        // std::cout << "done - out of data" << std::endl;
     }
     static int handle_packet(uv_async_t *handle)
     {
@@ -70,32 +91,18 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
         int rc = recv(obj->sd, (char *)(buffer + BUFFER_OFFSET_IP), BUFFER_SIZE_IP, 0);
         if (rc == SOCKET_ERROR)
         {
-            errorCode = WSAGetLastError();
-            if (errorCode == WSAEWOULDBLOCK)
-            {
-                std::cout << "shouldblock" << std::endl;
-                return 0;
-            }
-            return errorCode;
+            return WSAGetLastError();
         }
         if (rc == 0) // End of file for some strange reason, so stop reading packets.
         {
             errorCode = -1;
             return errorCode;
         }
-        if (rc <= BUFFER_OFFSET_IP)
-        {
-            // std::cout << "rc <= BUFFER_OFFSET_IP" << std::endl;
-
-            return 0; // malformed data: silent (probably not IP packet)
-        }
         // filter port
         uint8_t ipHeaderLen = (buffer[BUFFER_OFFSET_IP] & 0x0f) * 4;
-        if (rc <= BUFFER_OFFSET_IP + ipHeaderLen + 3)
+        if (rc < ipHeaderLen + 4)
         {
-            // std::cout << "rc <= BUFFER_OFFSET_IP + ipHeaderLen + 3" << std::endl;
-
-            return 0; // malformed data: silent (probably not IP packet)
+            return 0; // malformed data: silent (probably not TCP packet, not long enough to contain ports
         }
         uint8_t protocol = buffer[BUFFER_OFFSET_IP + 9];
         if (protocol != 6) // check for tcp
@@ -194,6 +201,8 @@ public:
             Napi::Error::New(env, "socket() failed").ThrowAsJavaScriptException();
             return;
         }
+        FD_ZERO(&this->readSet);
+        FD_SET(sd, &this->readSet);
 
         // Bind the socket to the specified IP address.
         int rc = bind(sd, (struct sockaddr *)&addr, sizeof(addr));
@@ -214,11 +223,35 @@ public:
             return;
         }
 
+        u_long mode = 1; // 1 to enable non-blocking socket
+        ioctlsocket(sd, FIONBIO, &mode);
+
         int r = uv_async_init(uv_default_loop(),
                               &this->async,
                               (uv_async_cb)RawSocketCapture::cb_packets);
+        eventHandle = WSACreateEvent();
+        WSAEventSelect(sd, eventHandle, FD_READ);
         this->async.data = this;
-        uv_async_send(&this->async);
+        r = RegisterWaitForSingleObject(
+            &this->wait,
+            eventHandle,
+            RawSocketCapture::OnPacket,
+            &this->async,
+            INFINITE,
+            WT_EXECUTEINWAITTHREAD);
+        if (!r)
+        {
+            char *errmsg = nullptr;
+            FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                          nullptr,
+                          GetLastError(),
+                          MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                          (LPTSTR)&errmsg,
+                          0,
+                          nullptr);
+            Napi::TypeError::New(env, errmsg).ThrowAsJavaScriptException();
+            return;
+        }
     }
     static Napi::Function Init(Napi::Env env, Napi::Object exports)
     {
