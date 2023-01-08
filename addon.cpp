@@ -20,6 +20,7 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
     SOCKET sd;
     FD_SET readSet;
     int port;
+    bool isReading = false;
 
     unsigned char *buffer;
     UINT errorCode = 0;
@@ -27,6 +28,7 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
     DWORD handle;
     struct sockaddr_in addr;
     int dwIoControlCode;
+    int recvBuffSize;
 
     Napi::ThreadSafeFunction tsEmit_;
     uv_async_t async;
@@ -46,6 +48,11 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
     static void CALLBACK OnPacket(void *data, BOOLEAN didTimeout)
     {
         uv_async_t *async = (uv_async_t *)data;
+        RawSocketCapture *obj = ((RawSocketCapture *)async->data);
+        if (obj->isReading)
+            return;
+        obj->isReading = true;
+
         int r = uv_async_send(async);
     }
     static void cb_packets(uv_async_t *handle)
@@ -68,10 +75,13 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
             int errorCode = handle_packet(handle); // consume all data
             if (errorCode == WSAEWOULDBLOCK)
             {
+                obj->isReading = false;
+                WSAResetEvent(obj->eventHandle);
                 break;
             }
             if (errorCode)
             {
+                std::cout << errorCode << std::endl;
                 obj->tsEmit_.Release();
                 //  TODO: emit close/error ?
                 return;
@@ -102,12 +112,12 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
         uint8_t ipHeaderLen = (buffer[BUFFER_OFFSET_IP] & 0x0f) * 4;
         if (rc < ipHeaderLen + 4)
         {
+            std::cout << "rc < ipHeaderLen + 4" << std::endl;
             return 0; // malformed data: silent (probably not TCP packet, not long enough to contain ports
         }
         uint8_t protocol = buffer[BUFFER_OFFSET_IP + 9];
         if (protocol != 6) // check for tcp
         {
-
             return 0; // ignore UDP (or any other if pkt is malformed)
         }
         // filter port
@@ -222,7 +232,14 @@ public:
             Napi::Error::New(env, "WSAIoctl() failed").ThrowAsJavaScriptException();
             return;
         }
-
+        recvBuffSize = 10 * 1024 * 1024;
+        rc = setsockopt(sd, SOL_SOCKET, SO_RCVBUF, (char *)&recvBuffSize, sizeof(recvBuffSize));
+        if (rc == SOCKET_ERROR)
+        {
+            close(info);
+            Napi::Error::New(env, "setsockopt() failed").ThrowAsJavaScriptException();
+            return;
+        }
         u_long mode = 1; // 1 to enable non-blocking socket
         ioctlsocket(sd, FIONBIO, &mode);
 
