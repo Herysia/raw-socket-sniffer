@@ -49,8 +49,11 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
     {
         uv_async_t *async = (uv_async_t *)data;
         RawSocketCapture *obj = ((RawSocketCapture *)async->data);
+        WSAResetEvent(obj->eventHandle);
         if (obj->isReading)
+        {
             return;
+        }
         obj->isReading = true;
 
         int r = uv_async_send(async);
@@ -76,7 +79,7 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
             if (errorCode == WSAEWOULDBLOCK)
             {
                 obj->isReading = false;
-                WSAResetEvent(obj->eventHandle);
+                WSASetEvent(obj->eventHandle);
                 break;
             }
             if (errorCode)
