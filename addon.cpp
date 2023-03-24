@@ -2,6 +2,7 @@
 #include "uv.h"
 #include <mstcpip.h>
 #include <iostream>
+// #include <iomanip>
 #include <napi.h>
 
 // Various sizes and offsets for our packet read buffer.
@@ -111,42 +112,75 @@ class RawSocketCapture : public Napi::ObjectWrap<RawSocketCapture>
             errorCode = -1;
             return errorCode;
         }
-        // filter port
-        uint8_t ipHeaderLen = (buffer[BUFFER_OFFSET_IP] & 0x0f) * 4;
-        if (rc < ipHeaderLen + 4)
+        uint32_t offset = 0;
+        while (offset < rc - BUFFER_SIZE_ETH)
         {
-            std::cout << "rc < ipHeaderLen + 4" << std::endl;
-            return 0; // malformed data: silent (probably not TCP packet, not long enough to contain ports
-        }
-        uint8_t protocol = buffer[BUFFER_OFFSET_IP + 9];
-        if (protocol != 6) // check for tcp
-        {
-            return 0; // ignore UDP (or any other if pkt is malformed)
-        }
-        // filter port
-        uint16_t srcport = (buffer[BUFFER_OFFSET_IP + ipHeaderLen] << 8) | buffer[BUFFER_OFFSET_IP + ipHeaderLen + 1];
-        uint16_t dstport = (buffer[BUFFER_OFFSET_IP + ipHeaderLen + 2] << 8) | buffer[BUFFER_OFFSET_IP + ipHeaderLen + 3];
-        if (obj->port == 0 || srcport == obj->port || dstport == obj->port)
-        {
-
-            // std::cout << srcport << "->" << dstport << std::endl;
-            //  Store for dispatch
-            auto packetLen = rc + BUFFER_SIZE_ETH;
-            // Build fake eth header
-            // memset(buffer, 0, 14);
-            // buffer[12] = 0x08;
-            PacketEventData *eventData = new PacketEventData;
-            // We save to a new buffer, as we will use a nonblocking emit, to keep this thread receiving packets
-            unsigned char *pktbuff = (unsigned char *)malloc(packetLen);
-            memcpy(pktbuff, buffer, packetLen);
-            eventData->copy_len = packetLen;
-            eventData->pkt_data = pktbuff;
-            auto cb = [](Napi::Env env, Napi::Function jsCallback, PacketEventData *data)
+            if (((buffer[offset + BUFFER_OFFSET_IP] & 0xf0) >> 4) != 4)
             {
-                jsCallback.Call({Napi::String::New(env, "data"), Napi::Buffer<unsigned char>::Copy(env, data->pkt_data, data->copy_len)});
-                free(data->pkt_data);
-            };
-            obj->tsEmit_.BlockingCall(eventData, cb);
+                /*
+                std::cout << "[Warning] - Not ipv4: " << ((buffer[offset + BUFFER_OFFSET_IP] & 0xf0) >> 4) << " offset: " << offset << " rc: " << rc << std::endl;
+
+                std::cout << std::hex << std::setfill('0');
+                for (auto i = 0; i < rc - BUFFER_SIZE_ETH + BUFFER_OFFSET_IP; i++)
+                {
+                    std::cout << std::setw(2) << (int)buffer[i];
+                }
+                std::cout << std::dec << std::endl;
+                */
+                return 0; // We want to process ipv4 only
+            }
+            uint8_t ipHeaderLen = (buffer[offset + BUFFER_OFFSET_IP] & 0x0f) * 4;
+            if (rc - offset < ipHeaderLen)
+            {
+                // std::cout << "[Warning] - rc < ipHeaderLen (invalid IP)" << " offset: " << offset << " rc: " << rc << " ipHeaderLen: " << (int)ipHeaderLen << std::endl;
+                return 0; // malformed data: silent (probably not IP packet, not long enough to contain ports
+            }
+            uint32_t fullLen = (buffer[offset + BUFFER_OFFSET_IP + 2] << 8) | buffer[offset + BUFFER_OFFSET_IP + 3];
+            if (fullLen == 0)
+                return 0; // Prevent infinite loop, just in case
+            uint8_t protocol = buffer[offset + BUFFER_OFFSET_IP + 9];
+            if (protocol != 6) // check for tcp
+            {
+                offset += fullLen;
+                // std::cout << "[Warning] - Not TCP: " << (int)protocol << std::endl;
+                continue; // ignore UDP (or any other if pkt is malformed)
+            }
+            if (rc - offset < ipHeaderLen + 4)
+            {
+                // std::cout << "[Warning] - rc < ipHeaderLen + 4 (incalid TCP)" << " offset: " << offset << " rc: " << rc << " ipHeaderLen: " << (int)ipHeaderLen << std::endl;
+                return 0; // malformed data: silent (probably not IP packet, not long enough to contain ports
+            }
+            if (rc - offset < fullLen)
+            {
+                // std::cout << "[Warning] - rc < fullLen" << std::endl;
+                return 0; // malformed data: silent (probably not IP packet, not long enough to contain ports
+            }
+            // filter port
+            uint16_t srcport = (buffer[offset + BUFFER_OFFSET_IP + ipHeaderLen] << 8) | buffer[offset + BUFFER_OFFSET_IP + ipHeaderLen + 1];
+            uint16_t dstport = (buffer[offset + BUFFER_OFFSET_IP + ipHeaderLen + 2] << 8) | buffer[offset + BUFFER_OFFSET_IP + ipHeaderLen + 3];
+            if (obj->port == 0 || srcport == obj->port || dstport == obj->port)
+            {
+                //  Store for dispatch
+                PacketEventData *eventData = new PacketEventData;
+                // We save to a new buffer, as we will use a nonblocking emit, to keep this thread receiving packets
+                unsigned char *pktbuff = (unsigned char *)malloc(fullLen + BUFFER_SIZE_ETH);
+                if (offset == 0)
+                    memcpy(pktbuff, buffer, fullLen + BUFFER_SIZE_ETH);
+                else
+                {
+                    memcpy(pktbuff, buffer, BUFFER_OFFSET_IP);
+                    memcpy(pktbuff + BUFFER_OFFSET_IP, buffer + offset + BUFFER_OFFSET_IP, fullLen);
+                }
+                eventData->copy_len = fullLen + BUFFER_SIZE_ETH;
+                eventData->pkt_data = pktbuff;
+                auto cb = [](Napi::Env env, Napi::Function jsCallback, PacketEventData *data)
+                {
+                    jsCallback.Call({Napi::String::New(env, "data"), Napi::Buffer<unsigned char>::Copy(env, data->pkt_data, data->copy_len)});
+                    free(data->pkt_data);
+                };
+                obj->tsEmit_.BlockingCall(eventData, cb);
+            }
+            offset += fullLen;
         }
         return 0;
     }
@@ -235,7 +269,7 @@ public:
             Napi::Error::New(env, "WSAIoctl() failed").ThrowAsJavaScriptException();
             return;
         }
-        recvBuffSize = 10 * 1024 * 1024;
+        recvBuffSize = 100 * 1024 * 1024;
         rc = setsockopt(sd, SOL_SOCKET, SO_RCVBUF, (char *)&recvBuffSize, sizeof(recvBuffSize));
         if (rc == SOCKET_ERROR)
         {

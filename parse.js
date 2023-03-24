@@ -1,6 +1,6 @@
 const fs = require("fs");
 
-const data = fs.readFileSync("log2.txt", "utf-8");
+const data = fs.readFileSync("log2.txt", "utf16le");
 fs.writeFileSync("out.txt", "");
 let cp = [];
 let rs = [];
@@ -20,12 +20,14 @@ split.forEach((line) => {
 console.log(cp.length, rs.length);
 for (let i = 0; i < cp.length; i++) {
   if (!cp.includes(rs[i])) {
-    console.log("Diff found, cp:" + i);
+    console.log("Diff found, cp - " + i);
   }
   if (!rs.includes(cp[i])) {
-    console.log("Diff found, rs:" + i);
+    console.log("Diff found, rs - " + i);
   }
-  if (rs[i] != cp[i]) console.log(i);
+  if (rs[i] != cp[i]) {
+    // console.log(i);
+  }
   if (i == cp.length - 1) {
     console.log("no diff");
     break;

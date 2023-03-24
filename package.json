@@ -25,7 +25,7 @@
   "gypfile": true,
   "dependencies": {
     "bindings": "^1.2.1",
-    "node-addon-api": "^1.7.1"
+    "node-addon-api": "^6.0.0"
   },
   "devDependencies": {
     "cap": "^0.2.1"
